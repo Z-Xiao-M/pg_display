@@ -3,6 +3,7 @@
 #include "fmgr.h"
 #include "miscadmin.h"
 #include "utils/elog.h"
+#include "utils/builtins.h"
 
 #include <time.h>
 
@@ -10,6 +11,7 @@ PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(play_badapple);
 PG_FUNCTION_INFO_V1(play_basketball);
+PG_FUNCTION_INFO_V1(play_anything);
 
 /*
  * get the lines from a text file
@@ -121,5 +123,54 @@ Datum play_badapple(PG_FUNCTION_ARGS) {
 
 Datum play_basketball(PG_FUNCTION_ARGS) {
   play("basketball.txt");
+  PG_RETURN_VOID();
+}
+
+Datum play_anything(PG_FUNCTION_ARGS) {
+  char **play_lines;
+  int numframes = 0;
+  int numlines = 0;
+  int nline = PG_GETARG_INT32(1);  /* per frame. */
+  char play_frame[4000];
+  struct timespec start_tm;
+
+  play_lines = readfile(text_to_cstring(PG_GETARG_TEXT_PP(0)));
+  for (int i = 0; play_lines[i]; i++)
+    numlines++;
+  numframes = numlines / nline;
+
+  if (clock_gettime(CLOCK_MONOTONIC, &start_tm) != 0)
+    ereport(ERROR, (errmsg("clock_gettime() failed due to: %m")));
+
+  for (;;) {
+    int frame;
+    int len = 0;
+    float elapsed;
+    struct timespec current_tm;
+    MemSet(play_frame, 0, sizeof(play_frame));
+
+    if (clock_gettime(CLOCK_MONOTONIC, &current_tm) != 0)
+      ereport(ERROR, (errmsg("clock_gettime() failed due to: %m")));
+
+    elapsed = (current_tm.tv_sec - start_tm.tv_sec) +
+              ((current_tm.tv_nsec - start_tm.tv_nsec) / 1000000000.0);
+    frame = (int)(elapsed * 10);
+
+    if (frame >= numframes)
+      break;
+
+    for (int row = 0; row < nline; ++row) {
+      memcpy(&play_frame[len], play_lines[frame * nline + row],
+             strlen(play_lines[frame * nline + row]));
+      len += strlen(play_lines[frame * nline + row]);
+    }
+
+    ereport(NOTICE, (errmsg("\033c" /* Reset device. */
+                            "%s",
+                            play_frame)));
+    pg_usleep(50000);
+    CHECK_FOR_INTERRUPTS();
+  }
+
   PG_RETURN_VOID();
 }
